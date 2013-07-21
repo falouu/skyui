@@ -86,6 +86,7 @@ class Map.MapMarker extends gfx.controls.Button
 		hitArea = HitAreaClip;
 		
 		textField = TextClip.MarkerNameField;
+		
 		textField.autoSize = "left";
 		
 		disableFocus = true;

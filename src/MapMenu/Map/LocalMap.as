@@ -2,6 +2,8 @@
 import Map.MapMenu;
 import Map.LocationFinder;
 
+import Map.MCMwNEditDialog;
+
 class Map.LocalMap extends MovieClip
 { 
   /* CONSTANTS */
@@ -9,6 +11,7 @@ class Map.LocalMap extends MovieClip
 	private static var STATE_HIDDEN = 0;
 	private static var STATE_LOCALMAP = 1;
 	private static var STATE_FINDLOCATION = 2;
+	private static var STATE_MCMWN_EDIT_DIALOG = 3;
 	
 
   /* PRIVATE VARIABLES */
@@ -27,6 +30,11 @@ class Map.LocalMap extends MovieClip
 	private var _state: Number = STATE_HIDDEN;
 	
 	private var _bRequestFindLoc: Boolean = false;
+	
+  /* MCMwN  */
+	private var _MCMwNEditDialog: MCMwNEditDialog;
+	
+	private var _bRequestMCMwNEditDial: Boolean = false;
 	
 	
   /* STAGE ELEMENTS */
@@ -103,6 +111,8 @@ class Map.LocalMap extends MovieClip
 		if (a_bShow) {
 			if (_bRequestFindLoc)
 				setState(STATE_FINDLOCATION);
+			else if(_bRequestMCMwNEditDial)
+				setState(STATE_MCMWN_EDIT_DIALOG);
 			else
 				setState(STATE_LOCALMAP);
 		} else {
@@ -110,6 +120,7 @@ class Map.LocalMap extends MovieClip
 		}
 		
 		_bRequestFindLoc = false;
+		_bRequestMCMwNEditDial = false;
 	}
 
 	// @API
@@ -172,7 +183,7 @@ class Map.LocalMap extends MovieClip
 			buttonPanel.button5.visible = false;
 			buttonPanel.button6.visible = false;
 			
-		} else if (a_newState == STATE_FINDLOCATION) {
+		} else if (a_newState == STATE_FINDLOCATION or a_newState == STATE_MCMWN_EDIT_DIALOG) {
 			updateLocalMapExtends(false);
 			
 			if (oldState == STATE_LOCALMAP) {
@@ -181,21 +192,28 @@ class Map.LocalMap extends MovieClip
 			} else {
 				_parent._visible = false;
 			}
-			
-			_locationFinder.show();
+			if(a_newState == STATE_FINDLOCATION){
+				_locationFinder.show();
+				buttonPanel.button6.visible = true;
+			} else {
+				_MCMwNEditDialog.show();
+				buttonPanel.button6.visible = false;
+			}
 			
 			buttonPanel.button0.label = "$World Map";
 			buttonPanel.button2.visible = false;
 			buttonPanel.button3.visible = false;
 			buttonPanel.button4.visible = false;
 			buttonPanel.button5.visible = false;
-			buttonPanel.button6.visible = true;
+			
 			
 		} else if (a_newState == STATE_HIDDEN) {
 			if (oldState == STATE_LOCALMAP) {
 				_parent.gotoAndPlay("fadeOut");
 			} else if (oldState == STATE_FINDLOCATION) {
 				_locationFinder.hide();
+			} else if (oldState == STATE_MCMWN_EDIT_DIALOG) {
+				_MCMwNEditDialog.hide();
 			}
 			_parent._visible = true;
 			
@@ -224,6 +242,26 @@ class Map.LocalMap extends MovieClip
 			GameDelegate.call("SetLocalMapExtents", [textureTopLeft.x, textureTopLeft.y, textureBottomRight.x, textureBottomRight.y]);
 		} else {
 			GameDelegate.call("SetLocalMapExtents", [0, 0, 0, 0]);
+		}
+	}
+	
+	/* MCMwN  */
+	public function setMCMwNEditDialog(a_MCMwNEditDialog: MCMwNEditDialog): Void
+	{
+		_MCMwNEditDialog = a_MCMwNEditDialog;
+	}
+	
+	public function showMCMwNEditDialog(note: String): Void
+	{
+		_MCMwNEditDialog.setMessage(note);
+		// Local map mode
+		if (_state == STATE_LOCALMAP) {
+			setState(STATE_MCMWN_EDIT_DIALOG);
+
+		// World map mode - delay state update for Show()
+		} else if (_state == STATE_HIDDEN) {
+			_bRequestMCMwNEditDial = true;
+			GameDelegate.call("ToggleMapCallback", []);			
 		}
 	}
 }

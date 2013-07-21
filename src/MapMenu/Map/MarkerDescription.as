@@ -5,8 +5,7 @@ class Map.MarkerDescription extends MovieClip
 	var DescriptionList: Array;
 	var LineItem0: MovieClip;
 	var Title: TextField;
-
-
+	
   /* INITIALIZATION */
 
 	public function MarkerDescription()
@@ -19,9 +18,13 @@ class Map.MarkerDescription extends MovieClip
 		DescriptionList[0]._visible = false;
 	}
 
+	private static var ind : Number = 0;
+
 	function SetDescription(aTitle: String, aLineItems: Array): Void
 	{
-		Title.text = aTitle == undefined ? "" : aTitle;
+		var lTitle = aTitle == undefined ? "" : aTitle;	
+		Title.text = Map.MapMenu.getInstance().setAndAnalyzeSelectedMarkerName(lTitle, true);	  
+		
 		var totalHeight: Number = Title.text.length <= 0 ? 0 : Title._height;
 		
 		for (var i: Number = 0; i < aLineItems.length; i++) {

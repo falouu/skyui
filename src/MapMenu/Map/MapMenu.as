@@ -12,6 +12,7 @@ import Shared.GlobalFunc;
 import skyui.components.ButtonPanel;
 import skyui.components.MappedButton;
 import skyui.defines.Input;
+import skyui.util.DialogManager;
 
 /*
 	A few comments:
@@ -83,6 +84,22 @@ class Map.MapMenu
 	private var _setDestControls: Object;
 	private var _findLocControls: Object;
 	
+   /* MCMwN */
+    private static var _instance: MapMenu;
+	private static var MCMWN_MARKER_PATTERN: String = "Marked Location ";
+	private static var MCMWN_MAX_TITLE_LENGTH: Number = 100;
+	private static var MCMWN_MARKER_CLIP: String = "PlayerSetMarker";
+	/* dispatched SKSE events */
+	private static var sMarkerRemoveEvent: String = "MCMwN_markerRemove"
+	private static var sMarkerChangeNoteEvent: String = "MCMwN_markerChangeNote"
+	private var _MCMwNEditDialog: Map.MCMwNEditDialog;
+	private var _MCMwNclickedMarker: MovieClip;
+	//// type of current selected marker
+	//public var currentMarkerTypeString: String;
+	private var _customMarkersData: Array;
+	/* -1 if selected marker is not custom marker */
+	private var _selectedCustomMarkerId: Number = -1;
+	private var _clickedCustomMarkerId : Number = -1;
 	
   /* STAGE ELEMENTS */
   
@@ -109,12 +126,13 @@ class Map.MapMenu
 	
 	// @GFx
 	public var bPCControlsReady: Boolean = true;
-
+	
 
   /* INITIALIZATION */
 
 	public function MapMenu(a_mapMovie: MovieClip)
 	{
+		_instance = this;
 		_mapMovie = a_mapMovie == undefined ? _root : a_mapMovie;
 		_markerContainer = _mapMovie.createEmptyMovieClip("MarkerClips", 1);
 		
@@ -130,6 +148,11 @@ class Map.MapMenu
 		if (LocalMapMenu != undefined) {
 			LocalMapMenu.setBottomBar(_bottomBar);
 			LocalMapMenu.setLocationFinder(_locationFinder);
+			//// <rhobar3@gmail.com>
+			_MCMwNEditDialog = _mapMovie.MCMwNEditDialogFaderInstance.MCMwNEditDialogInstance;
+			LocalMapMenu.setMCMwNEditDialog(_MCMwNEditDialog);
+			_MCMwNEditDialog.addEventListener("acceptPress", this, "onMCMwNEditDialogAcceptPress");
+			_MCMwNEditDialog.addEventListener("deletePress", this, "onMCMwNEditDialogDeletePress");
 			
 			Mouse.addListener(this);
 			FocusHandler.instance.setFocus(this,0);
@@ -138,11 +161,8 @@ class Map.MapMenu
 		_markerDescriptionHolder = _mapMovie.attachMovie("DescriptionHolder", "markerDescriptionHolder", _mapMovie.getNextHighestDepth());
 		_markerDescriptionHolder._visible = false;
 		_markerDescriptionHolder.hitTestDisable = true;
-		
 		MarkerDescriptionObj = _markerDescriptionHolder.Description;
-		
 		Stage.addListener(this);
-		
 		initialize();
 	}
 	
@@ -222,14 +242,30 @@ class Map.MapMenu
 			var markerName = MarkerData[j + Map.MapMenu.CREATE_NAME];
 			var isUndiscovered = MarkerData[j + Map.MapMenu.CREATE_UNDISCOVERED];
 			
-			var mapMarker: MovieClip = _markerContainer.attachMovie(Map.MapMarker.ICON_TYPES[markerType], "Marker" + _nextCreateIndex, _nextCreateIndex);
-			_markerList[_nextCreateIndex] = mapMarker;
-			
-			if (markerType == PlayerLocationMarkerType) {
-				YouAreHereMarker = mapMarker.Icon;
+			var cmId = getCustomMarkerId(markerName);
+			if(cmId < 0){
+				// regular marker
+				var mapMarker: MovieClip = _markerContainer.attachMovie(Map.MapMarker.ICON_TYPES[markerType], "Marker" + _nextCreateIndex, _nextCreateIndex);
+				if (markerType == PlayerLocationMarkerType) {
+					YouAreHereMarker = mapMarker.Icon;
+				}
+				mapMarker.label = markerName;
+				if (isUndiscovered && mapMarker.IconClip != undefined) {
+					var depth: Number = mapMarker.IconClip.getNextHighestDepth();
+					mapMarker.IconClip.attachMovie(Map.MapMarker.ICON_TYPES[markerType] + "Undiscovered", "UndiscoveredIcon", depth);
+				}
+			} else {
+				// MCMwM custom marker
+				var mapMarker: MovieClip = _markerContainer.attachMovie(MCMWN_MARKER_CLIP, "Marker" + _nextCreateIndex, _nextCreateIndex);
+				mapMarker._x += 0.15*mapMarker._width;
+				mapMarker._y += 0.15*mapMarker._height;
+				mapMarker._xscale = 70;
+				mapMarker._yscale = 70;
+				mapMarker.label = getCustomMarkerTitle(cmId, markerName);
 			}
+			
+			_markerList[_nextCreateIndex] = mapMarker;
 			mapMarker.index = _nextCreateIndex;
-			mapMarker.label = markerName;				
 			mapMarker.textField._visible = false;
 			mapMarker.visible = false;
 			mapMarker.iconType = markerType;
@@ -239,12 +275,6 @@ class Map.MapMenu
 			if (0 < markerType && markerType < Map.LocationFinder.TYPE_RANGE) {
 				_locationFinder.list.entryList.push(mapMarker);
 			}
-			
-			if (isUndiscovered && mapMarker.IconClip != undefined) {
-				var depth: Number = mapMarker.IconClip.getNextHighestDepth();
-				mapMarker.IconClip.attachMovie(Map.MapMarker.ICON_TYPES[markerType] + "Undiscovered", "UndiscoveredIcon", depth);
-			}
-			
 			++i;
 			++_nextCreateIndex;
 			
@@ -300,7 +330,7 @@ class Map.MapMenu
 		
 		if (marker != null && !_bottomBar.hitTest(_root._xmouse, _root._ymouse) && marker.visible && marker.MarkerRollOver()) {
 			_selectedMarker = marker;
-			_markerDescriptionHolder._visible = true;
+			_markerDescriptionHolder._visible = true; 
 			_markerDescriptionHolder.gotoAndPlay("Show");
 			return;
 		}
@@ -311,7 +341,14 @@ class Map.MapMenu
 	public function ClickSelectedMarker(): Void
 	{
 		if (_selectedMarker != undefined) {
-			_selectedMarker.MarkerClick();
+			//// <rhobar3@gmail.com> 
+			if(_selectedCustomMarkerId > 0){
+				_MCMwNclickedMarker = _selectedMarker;
+				_clickedCustomMarkerId = _selectedCustomMarkerId
+				LocalMapMenu.showMCMwNEditDialog( _customMarkersData[_selectedCustomMarkerId-1] );
+			} else {
+				_selectedMarker.MarkerClick();
+			}
 		}
 	}
 
@@ -343,6 +380,10 @@ class Map.MapMenu
 			_bottomBar.buttonPanel.setPlatform(a_platform, a_bPS3Switch);
 
 			createButtons(a_platform != ButtonChange.PLATFORM_PC);
+		}
+		if(LocalMapMenu._MCMwNEditDialog != undefined) {
+			_MCMwNEditDialog.buttonPanel.setPlatform(a_platform, a_bPS3Switch);
+			_MCMwNEditDialog.initButtons(a_platform);
 		}
 		
 		InputDelegate.instance.isGamepad = a_platform != ButtonChange.PLATFORM_PC;
@@ -468,4 +509,89 @@ class Map.MapMenu
 		
 		buttonPanel.updateButtons(true);
 	}
+	
+ ///* MCMwN */
+
+	// @API
+	public static function setCustomMarkersData(){
+		_instance._customMarkersData = [];
+		var cmData = _instance._customMarkersData;
+		for (var i = 0; i < arguments.length; i++){
+			cmData[i] = arguments[i];
+		}
+	}
+	
+	public static function getInstance(): MapMenu
+	{
+		return _instance;
+	}
+	
+	/* return proper marker title to show */
+	public function setAndAnalyzeSelectedMarkerName(markerName: String, select: Boolean): String
+	{
+		var cmId = getCustomMarkerId(markerName);
+		if(select){
+		   _selectedCustomMarkerId = cmId;
+		}
+		if(cmId < 1){
+			return markerName;
+		}
+		return getCustomMarkerTitle(cmId, markerName);
+	}
+	
+	private function getCustomMarkerTitle(cmId: Number, markerName: String): String 
+	{
+		var cmNote = _customMarkersData[cmId-1];
+		if(cmNote == undefined or GlobalFunc.StringTrim(cmNote) == ""){
+			return markerName;
+		}
+		return getCustomMarkerTitleFromNote(cmNote);
+	}
+	
+	/* event listeners */
+	private function onMCMwNEditDialogAcceptPress(event: Object)
+	{
+		//skse.Log("Map.MapMenu - onMCMwNEditDialogAcceptPress()");
+		_customMarkersData[ _clickedCustomMarkerId - 1 ] = event.data;
+		skse.SendModEvent(sMarkerChangeNoteEvent, event.data,  _clickedCustomMarkerId);
+		_MCMwNclickedMarker.MarkerClick();
+		_MCMwNclickedMarker = null;
+		_clickedCustomMarkerId = -1;
+	}
+	
+	private function onMCMwNEditDialogDeletePress()
+	{
+		skse.SendModEvent(sMarkerRemoveEvent, null,  _clickedCustomMarkerId);
+		_MCMwNclickedMarker = null;
+		_clickedCustomMarkerId = -1;
+	}
+	
+	/* return -1 if not custom marker */
+	private function getCustomMarkerId(markerName: String): Number
+	{
+		var pattern = markerName.substr(0, MCMWN_MARKER_PATTERN.length);
+		if(pattern != MCMWN_MARKER_PATTERN){
+			return -1;
+		}
+		var id = parseInt( markerName.substr( MCMWN_MARKER_PATTERN.length ) )
+		if( id == Number.NaN or id < 1){
+			return -1;
+		}
+		return id;
+	}
+	
+	private function getCustomMarkerTitleFromNote(note: String): String
+	{
+		note = String(note); 
+		var lf = note.indexOf("\r");
+		if(lf < 0){
+			lf = note.length;
+		}
+		if(lf > MCMWN_MAX_TITLE_LENGTH){
+			lf = MCMWN_MAX_TITLE_LENGTH;
+		}
+		return note.slice(0, lf)
+	}
+	
+
 }
